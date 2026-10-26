@@ -36,6 +36,8 @@ def summarize(output, records, samples, interval, finished=False):
     value = {'finished': finished, 'completed': len(records), 'total': len(samples),
              'interval_seconds': interval,
              'raw_counts': dict(Counter(r['raw'] for r in records)),
+             'missing_reasons': dict(Counter(r.get('missing_reason') or 'no_recording'
+                                            for r in records if r['raw'] == 'missing')),
              'filtered_counts': dict(Counter(r['filtered'] for r in records)),
              'held_unknown_samples': sum(r['held_unknown'] for r in records),
              'window_start': samples[0]['timestamp'],
@@ -46,7 +48,7 @@ def summarize(output, records, samples, interval, finished=False):
         return
     save_json(output/'summary.json', value)
     with (output/'results.csv').open('w', newline='', encoding='utf-8-sig') as f:
-        writer = csv.DictWriter(f, fieldnames=['id', 'timestamp', 'raw', 'filtered', 'held_unknown', 'inference_seconds'])
+        writer = csv.DictWriter(f, fieldnames=['id', 'timestamp', 'raw', 'filtered', 'held_unknown', 'missing_reason', 'inference_seconds'])
         writer.writeheader()
         writer.writerows({k: row.get(k) for k in writer.fieldnames} for row in records)
     segments = []
@@ -60,6 +62,26 @@ def summarize(output, records, samples, interval, finished=False):
             segments[-1]['samples'] += 1
             segments[-1]['held_unknown_samples'] += int(record['held_unknown'])
     save_json(output/'segments.json', segments)
+
+
+def extract_crop(http, sample, frame, crop, ffmpeg, output):
+    video, full = output/'current.mp4', output/'current-full.jpg'
+    full.unlink(missing_ok=True)
+    with http.open(sample['video_url'], timeout=60) as source, video.open('wb') as target:
+        shutil.copyfileobj(source, target)
+    subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-threads', '2',
+                    '-ss', str(sample['offset_seconds']), '-i', str(video),
+                    '-pix_fmt', 'yuvj420p', '-color_range', 'pc',
+                    '-frames:v', '1', '-update', '1', '-y', str(full)],
+                   stdout=subprocess.DEVNULL, check=True, timeout=60)
+    # A segment's indexed end can extend past its last decodable video frame.
+    available = full.exists()
+    if available:
+        with Image.open(full) as image:
+            transform(image.convert('RGB'), crop).save(frame, quality=95)
+        full.unlink()
+    video.unlink()
+    return available
 
 
 def run(config_path):
@@ -90,22 +112,13 @@ def run(config_path):
     summarize(output, records, samples, interval)
     for sample in samples[len(records):]:
         raw, seconds, response = 'missing', None, None
+        missing_reason = 'no_recording'
+        frame = frames/(sample['id']+'.jpg')
+        available = False
         if sample['video_url']:
-            frame = frames/(sample['id']+'.jpg')
-            if not frame.exists():
-                video = output/'current.mp4'
-                full = output/'current-full.jpg'
-                with http.open(sample['video_url'], timeout=60) as source, video.open('wb') as target:
-                    shutil.copyfileobj(source, target)
-                subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-threads', '2',
-                                '-ss', str(sample['offset_seconds']), '-i', str(video),
-                                '-pix_fmt', 'yuvj420p', '-color_range', 'pc',
-                                '-frames:v', '1', '-update', '1', '-y', str(full)],
-                               stdout=subprocess.DEVNULL, check=True, timeout=60)
-                with Image.open(full) as image:
-                    transform(image.convert('RGB'), crop).save(frame, quality=95)
-                full.unlink()
-                video.unlink()
+            available = frame.exists() or extract_crop(http, sample, frame, crop, ffmpeg, output)
+            missing_reason = 'no_frame_at_sample_time' if not available else None
+        if available:
             content = [{'type': 'image_url', 'image_url': {
                 'url': 'data:image/jpeg;base64,'+base64.b64encode(frame.read_bytes()).decode()}}]
             payload = {'model': config['model'], 'messages': [
@@ -127,6 +140,7 @@ def run(config_path):
                   'raw': raw, 'filtered': filtered,
                   'held_unknown': raw == 'unclear' and filtered != 'unclear',
                   'inference_seconds': seconds,
+                  'missing_reason': missing_reason,
                   'usage': response.get('usage') if response else None}
         with result_path.open('a', encoding='utf-8') as f:
             f.write(json.dumps(record, ensure_ascii=False)+'\n')

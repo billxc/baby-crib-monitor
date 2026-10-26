@@ -59,7 +59,7 @@ python runtime/runner.py /path/to/private/config.json
 
 每帧输出原始 `yes / no / unclear` 及滤波结果。默认使用最近3次采样的多数决：至少2票才切换；`unclear` 不投票，平票或票数不足时保留上一状态；第一次明确结果用于初始化。缺失录像标记 `missing` 并重置滤波，不跨录像缺口延续状态。这是因果滤波，不使用未来帧、不回填转换时间。
 
-输出包括 `frames/` 裁切图、可断点续跑的 `results.jsonl`、`progress.json`，完成后生成 `results.csv`、`summary.json`、`segments.json`。输出保留原始不明确/缺失标记，不能只看滤波结果推断这些时段都被成功观察。重跑必须使用相同冻结配置和采样清单。
+输出包括 `frames/` 裁切图、可断点续跑的 `results.jsonl`、`progress.json`，完成后生成 `results.csv`、`summary.json`、`segments.json`。输出保留原始不明确/缺失标记，不能只看滤波结果推断这些时段都被成功观察。有录像索引但目标时刻没有可解码视频帧时，记为 `missing`，并记录 `missing_reason: no_frame_at_sample_time`；不移动采样时刻、不用别的画面替代。重跑必须使用相同冻结配置和采样清单。
 
 尚未实现实时采集、自动发现录像或在线通知。本项目不做活体检测，也不把床位占用信号解释为已确认睡眠。
 
