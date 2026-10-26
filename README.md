@@ -29,7 +29,7 @@ JSON 包含 `source_size`、顺序执行的 `operations` 和 `output_size`。
 | 通用前端、合成示意图、合成数据测试、文档 | 家庭画面、录像、裁切图片、模型输入输出、实际坐标参数 |
 | 通用工具及占位配置 | 摄像头地址/凭据、Cookie、API Key、实际服务地址、部署记录和本机发布脚本 |
 
-建议将私有数据放在**仓库外的独立目录**；临时需要在仓库内使用时，只放到已忽略的 `.local/`。不要用真实画面当测试夹具，不把含图片的 data URL 写进源码。仓库初始历史从无家庭数据的干净代码创建。
+所有真实数据必须放在**仓库外的独立目录**；已忽略的 `.local/` 只用于非敏感临时开发，不放家庭画面或真实配置。不要用真实画面当测试夹具，不把含图片的 data URL 写进源码。仓库初始历史从无家庭数据的干净代码创建。
 
 发布前检查 `git status --short`、`git diff --cached` 和 `git ls-files`；不要对本机数据目录执行 `git add -f`。
 
@@ -73,7 +73,7 @@ python runtime/live.py /path/to/private/config.json --cycles 3
 python runtime/live.py /path/to/private/config.json
 ```
 
-仅从运行机器通过 RTSP TCP 抽取一帧，完整解码后按相同的有序变换裁切，再发起一个请求（仅含这一张裁切图）。复用历史 runner 的 prompt、JSON schema、temperature=0、seed=42、max_completion_tokens=32、enable_thinking=false。不会自动切换模型或回退到云服务。两个 runner 都只向私有配置中的 `model_base_url` 发送裁切图；示例使用不可用的 `example.invalid` 占位地址，不内置实际服务。请自行运行并选择可信的本地模型端点；若改为远程或云端地址，图片就会离开运行机器。`ffmpeg` 可在私有配置中指定，否则使用 imageio-ffmpeg 内置路径。
+仅从运行机器通过 RTSP TCP 抽取一帧，在 FFmpeg 输入 `-i` 前指定 `-skip_frame nokey`，于既有 capture 超时内等待解码器关键帧，再完整解码并按相同的有序变换裁切，发起一个请求（仅含这一张裁切图）。这避免把 H.265 初始化时缺参考的首个 P 帧当作正常现场画面；并不保证任意坏流或遮挡都能自动识别。复用历史 runner 的 prompt、JSON schema、temperature=0、seed=42、max_completion_tokens=32、enable_thinking=false。不会自动切换模型或回退到云服务。两个 runner 都只向私有配置中的 `model_base_url` 发送裁切图；示例使用不可用的 `example.invalid` 占位地址，不内置实际服务。请自行运行并选择可信的本地模型端点；若改为远程或云端地址，图片就会离开运行机器。`ffmpeg` 可在私有配置中指定，否则使用 imageio-ffmpeg 内置路径。
 
 - 固定 **60 秒**周期，串行、不重叠；取流和推理有独立超时。耗时过长则跳过错过的 tick，不补跑、不积压；跳过后重置滤波并在当前状态和下一条记录中标记缺口。
 - 因果最近 **3 次观测**多数决（不是旧的 120 秒采样）：`unclear` 不投票，至少 2 票才切换，票数不足/平票保持；首次明确结果初始化。图像缺失标为 `missing` 并清空状态。推理失败但图像存在时标为 `unclear`，另记错误，下一周期继续。
@@ -107,6 +107,23 @@ python runtime/live.py /path/to/private/config.json
 
 旧静态 runner 的兼容托管方式可使用系统任务调度器（新 YOLO 常驻部署优先上述 PM2）：绝对 Python 路径、冻结 release 路径、私有配置路径、用户级最低权限、忽略重复实例、崩溃重试和无限执行时长。任务应由系统而非 SSH 会话托管。配置/任务脚本、备份及验收证据不进 Git；先前台验证三个实际分钟周期，再启动任务并核对定义与启动结果。未重启验证时不要宣称已验收开机自启。
 
+## 可选：本地微调与通用工作流
+
+`training/train.py` 提供 YOLO11n / YOLO26n 的微调和独立验证入口，固定 Ultralytics **8.4.189**，默认 CPU、2线程。用户提供仓库外的私有 `data.yaml`、可信官方预训练 `.pt`、超参数、文件 hash 冻结及全新输出目录；没有内置模型、数据、实际标注或训练权重，不自动下载或上传 artifact。
+
+- [训练与验证](docs/TRAINING.md)：事件/时间分组、防近重复泄漏、冻结、val 选阈值、独立测试与视觉复核。
+- [通用工作流](docs/WORKFLOW.md)：采集/标注 → 训练 → YOLO crop + Qwen → PM2 → Prometheus/Grafana。通用说明不是实际部署验收证明；实时 capture 已等待关键帧，但可解码 JPEG 仍不是任意图像内容正常或无遮挡的证明。
+- [监控面板语义](docs/MONITORING.md)：只有数字指标，无真实数据源 UID/地址或图片。
+- [许可证边界](docs/LICENSE-BOUNDARY.md)：自有 MIT 与可选 Ultralytics/权重 AGPL/Enterprise 的独立约束。
+
+训练使用独立环境，不修改生产依赖。Intel Arc 不是 CUDA；未经验证的 GPU backend 不在支持承诺内。关闭遥测/第三方实验 callback、自动安装与网络请求的措施见训练文档；进程内 socket guard 不是 OS 安全沙箱，仍应限制出站网络。合成/mock 单测不下载模型或图像，应在目标运行机器执行：
+
+```sh
+python -m unittest discover -s training/tests -p 'test_*.py' -v
+```
+
+所有真实数据、标签、模型、日志、hash manifest 和运行配置永远 Git 外；`.gitignore` 不能代替 staged diff、完整历史和 clean archive 审计。
+
 ## License
 
-MIT。许可证仅适用于仓库自有代码和合成演示素材，不包含用户的私人数据。可选 Ultralytics 依赖、官方预训练及其派生权重有独立 **AGPL-3.0** 许可边界，不随本仓库转为 MIT。权重不随仓库分发；私有运行并不自动免除所有适用义务，集成/分发/网络服务前应核实对应许可要求。本项目不要求公开家庭图像。
+MIT。许可证仅适用于仓库自有代码和合成演示素材，不包含用户的私人数据。可选 Ultralytics 依赖、官方预训练及其派生权重有独立 **AGPL-3.0** 许可边界，不随本仓库转为 MIT。权重不随仓库分发；不分发权重或私有运行并不自动免除所有适用义务，自有 MIT 也不证明组合后整体可仅按 MIT 分发。集成/分发/网络服务前应核实对应许可要求，见[许可证边界](docs/LICENSE-BOUNDARY.md)。本项目不要求公开家庭图像；若适用义务与用户禁止公开敏感资料或权重的要求冲突，应停止相关发布并寻求专业审查，不擅自公开或重新许可用户资料。

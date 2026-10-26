@@ -1,0 +1,8 @@
+# Optional isolated training environment only; do not install into production.
+# Install torch/torchvision from the official CPU wheel index separately.
+ultralytics==8.4.189
+torch==2.7.1
+torchvision==0.22.1
+PyYAML==6.0.3
+# This is a direct-dependency pin, NOT a complete reproducibility lock.
+# Before real runs, privately capture pip freeze, Python/platform and CPU build.
