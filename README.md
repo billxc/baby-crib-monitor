@@ -35,7 +35,7 @@ JSON 包含 `source_size`、顺序执行的 `operations` 和 `output_size`。
 
 ## 开发测试
 
-需要 Node.js：
+前端测试需要 Node.js 20 或更新版本；直接打开裁切工具无需 Node.js：
 
 ```sh
 npm ci --include=dev
@@ -47,7 +47,7 @@ npm test
 
 ## 离线历史数据运行器
 
-`runtime/runner.py` 在运行机器上下载已选录像片段、定点抽帧、按导出的参数旋转裁切，然后向 OpenAI 兼容视觉接口发送**一张待判断图**。不使用参考图。前端工具仍无需后端。
+`runtime/runner.py` 在运行机器上下载已选录像片段、定点抽帧、按导出的参数旋转裁切，然后向 OpenAI 兼容视觉接口发送**一张待判断图**。不使用参考图。前端工具仍无需后端。两个 runner 均需要 Python 3.10 或更新版本及以下依赖。
 
 ```sh
 python -m pip install -r runtime/requirements.txt
@@ -73,14 +73,14 @@ python runtime/live.py /path/to/private/config.json --cycles 3
 python runtime/live.py /path/to/private/config.json
 ```
 
-仅从运行机器通过 RTSP TCP 抽取一帧，完整解码后按相同的有序变换裁切，再发起一个请求（仅含这一张裁切图）。复用历史 runner 的 prompt、JSON schema、temperature=0、seed=42、max_completion_tokens=32、enable_thinking=false。不会自动切换模型或调用云服务。`ffmpeg` 可在私有配置中指定，否则使用 imageio-ffmpeg 内置路径。
+仅从运行机器通过 RTSP TCP 抽取一帧，完整解码后按相同的有序变换裁切，再发起一个请求（仅含这一张裁切图）。复用历史 runner 的 prompt、JSON schema、temperature=0、seed=42、max_completion_tokens=32、enable_thinking=false。不会自动切换模型或回退到云服务。两个 runner 都只向私有配置中的 `model_base_url` 发送裁切图；示例使用不可用的 `example.invalid` 占位地址，不内置实际服务。请自行运行并选择可信的本地模型端点；若改为远程或云端地址，图片就会离开运行机器。`ffmpeg` 可在私有配置中指定，否则使用 imageio-ffmpeg 内置路径。
 
 - 固定 **60 秒**周期，串行、不重叠；取流和推理有独立超时。耗时过长则跳过错过的 tick，不补跑、不积压；跳过后重置滤波并在当前状态和下一条记录中标记缺口。
 - 因果最近 **3 次观测**多数决（不是旧的 120 秒采样）：`unclear` 不投票，至少 2 票才切换，票数不足/平票保持；首次明确结果初始化。图像缺失标为 `missing` 并清空状态。推理失败但图像存在时标为 `unclear`，另记错误，下一周期继续。
 - 输出目录持有 OS 文件锁，避免两个实例同时采样；异常退出自动释放。每次启动创建独立 session、重新初始化滤波，不跨进程停机延续票数。
 - `sessions/<unique>/run-config.json` 冻结配置，`full/` 保存原图，`frames/` 保存裁切图，`results.jsonl` 逐行保留 UTC 开始/完成时间、raw、filtered、unknown 保持标记、错误、缺失原因、模型响应及图像尺寸。可据此汇总时段，**不得将缺失/unknown 的保持状态视为观察成功**。
 - 根目录 `current.json` 原子更新当前结果；`heartbeat.json` 标记 PID、session、采样/等待/有限验证完成阶段。等待时每 5 秒更新，采样阶段受超时限制；调用方应同时检查心跳年龄和记录时间，不能把文件存在当作健康。
-- 所有输出（含模型响应、画面及错误详情）均为私有数据。runner 不自动删除历史产物；持续保留原图/裁切图会增长磁盘占用，需由所有者另行制定保留策略。
+- 所有输出（含模型响应、画面、冻结配置及错误详情）均为私有数据；标准输出、标准错误和任务调度器日志也可能包含私有地址或凭据，不可直接贴到公开 issue 或提交到 Git。`output_dir` 请填写仓库外的绝对路径；输入配置和输出目录应仅允许所有者访问。runner 不自动删除历史产物；持续保留原图/裁切图会增长磁盘占用，需由所有者另行制定保留策略。
 - 当前明确标为 `roi_mode: static`。摄像头转动后固定裁切可能不再对准床区；尚无动态床区识别或可靠性保证，不可用于婴儿安全告警。
 
 常驻运行可使用系统任务调度器：绝对 Python 路径、冻结 release 路径、私有配置路径、用户级最低权限、忽略重复实例、崩溃重试和无限执行时长。任务应由系统而非 SSH 会话托管。配置/任务脚本、备份及验收证据不进 Git；先前台验证三个实际分钟周期，再启动任务并核对定义与启动结果。未重启验证时不要宣称已验收开机自启。
