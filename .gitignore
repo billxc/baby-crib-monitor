@@ -13,6 +13,8 @@ exports/
 *.key
 # Dependencies and test artifacts
 node_modules/
+__pycache__/
+*.pyc
 test-results/
 playwright-report/
 .DS_Store

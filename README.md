@@ -1,6 +1,6 @@
 # Baby Crib Monitor
 
-本地优先的婴儿床占用观察项目。当前版本仅包含**纯前端画面裁切工具**；自动摄像头采集、模型检测和持续数据记录尚未实现。
+本地优先的婴儿床占用观察项目。包含**纯前端画面裁切工具**和**离线历史画面单图判断工具**。尚不包含实时采集服务。
 
 ## 当前可用：裁切工具
 
@@ -45,13 +45,23 @@ npm test
 
 测试使用合成示意图，Chromium 沙箱开启。无需真实摄像头或任何账号。网站部署时只需复制 `tools/crop/` 中的两个静态文件；现有反代/登录保护由部署环境负责，不属于此工具。
 
-## 后续方向
+## 离线历史数据运行器
 
-- 使用导出的固定变换参数处理摄像头帧。
-- 评估本地视觉模型的「在床 / 不在床 / 看不清」分类。
-- 持续记录占用信号及时间分布。
+`runtime/runner.py` 在运行机器上下载已选录像片段、定点抽帧、按导出的参数旋转裁切，然后向 OpenAI 兼容视觉接口发送**一张待判断图**。不使用参考图。前端工具仍无需后端。
 
-这些方向尚未实现；本项目不做活体检测，也不把床位占用信号解释为已确认睡眠。
+```sh
+python -m pip install -r runtime/requirements.txt
+python -m unittest discover -s runtime -p 'test_*.py'
+python runtime/runner.py /path/to/private/config.json
+```
+
+配置和数据必须放在仓库外。配置字段：`manifest`、`crop_config`（相对配置文件路径），`output_dir`、`model_base_url`、`model`、`interval_seconds`。采样清单由部署环境提前按固定间隔生成，每项包括 `id`、`epoch`、`timestamp`、`video_url`、`offset_seconds`；没有录像时 `video_url` 为 null，不拿别的时刻代替。录像与模型地址不写入源码，HTTPS 保持正常证书校验。
+
+每帧输出原始 `yes / no / unclear` 及滤波结果。默认使用最近3次采样的多数决：至少2票才切换；`unclear` 不投票，平票或票数不足时保留上一状态；第一次明确结果用于初始化。缺失录像标记 `missing` 并重置滤波，不跨录像缺口延续状态。这是因果滤波，不使用未来帧、不回填转换时间。
+
+输出包括 `frames/` 裁切图、可断点续跑的 `results.jsonl`、`progress.json`，完成后生成 `results.csv`、`summary.json`、`segments.json`。输出保留原始不明确/缺失标记，不能只看滤波结果推断这些时段都被成功观察。重跑必须使用相同冻结配置和采样清单。
+
+尚未实现实时采集、自动发现录像或在线通知。本项目不做活体检测，也不把床位占用信号解释为已确认睡眠。
 
 ## License
 
