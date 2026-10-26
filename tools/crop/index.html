@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>摄像头画面裁切</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#14171c;color:#e9edf3;font:15px system-ui,sans-serif}header{padding:18px 24px;background:#20252d}h1{font-size:20px;margin:0 0 8px}p{margin:6px 0;color:#aeb8c8}.bar{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 24px}button,.file{border:1px solid #495568;background:#2b3442;border-radius:7px;color:white;padding:9px 14px;cursor:pointer}button.primary{background:#2472cf;border-color:#2472cf}input[type=file]{display:none}input[type=number]{width:76px;background:#20252d;color:white;border:1px solid #495568;padding:8px;border-radius:5px}input[type=range]{width:180px;vertical-align:middle}.workspace{padding:8px 20px 16px;text-align:center;touch-action:none}canvas{max-width:100%;max-height:67vh;width:auto;height:auto;background:#333;cursor:crosshair;box-shadow:0 6px 30px #0006}#status{padding:8px 24px;color:#b9d7ff;white-space:pre-wrap}details{margin:8px 24px 24px;color:#aeb8c8}pre{white-space:pre-wrap;font-size:12px}button:disabled{opacity:.4;cursor:default}
+</style>
+<header><h1>摄像头画面裁切</h1><p>框选 → 裁切 → 旋转 → 再框选裁切。正角度为顺时针。所有处理都在浏览器内完成，不上传图片。</p></header>
+<div class="bar"><label class="file">打开图片<input id="file" type="file" accept="image/*"></label><button id="undo">撤销</button><button id="reset">恢复原图</button><button id="clear">取消选区</button></div>
+<div class="bar"><label>旋转 <input id="angle" type="range" min="-180" max="180" step="0.1" value="0"></label><label><input id="degrees" type="number" min="-180" max="180" step="0.1" value="0"> °</label><button id="rotate">应用旋转</button><button id="crop" class="primary">裁切选区</button><button id="save">导出图片</button><button id="params">导出参数 JSON</button></div>
+<div class="workspace"><canvas id="view"></canvas></div><div id="status">正在加载图片…</div>
+<details><summary>查看处理参数（坐标均为原始像素，不受页面显示大小影响）</summary><pre id="json"></pre></details>
+<script id="demo" type="image/svg+xml">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#dae1e8"/><g transform="translate(640 360) rotate(-10)"><rect x="-470" y="-270" width="940" height="540" rx="36" fill="#ac805b"/><rect x="-435" y="-235" width="870" height="470" rx="24" fill="#fbf7e9"/><path d="M-390 -180h780M-390 180h780" stroke="#b7cbd7" stroke-width="8" stroke-dasharray="16 16"/><text text-anchor="middle" y="-20" font-family="sans-serif" font-size="34" fill="#405569">Synthetic demo — no camera footage</text><text text-anchor="middle" y="40" font-family="sans-serif" font-size="24" fill="#65788a">Open an image, select a region, then crop and rotate.</text></g></svg>
+</script>
+<script>
+const $=id=>document.getElementById(id), view=$('view'), ctx=view.getContext('2d');
+let original, current, preview, selection=null, start=null, steps=[], history=[], sourceName='baby-camera', sourceSize;
+function canvas(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c}
+function angle(){return Number($('degrees').value)||0}
+function rect(){if(!selection)return null;const x=Math.round(Math.min(selection.x1,selection.x2)),y=Math.round(Math.min(selection.y1,selection.y2));return{x,y,width:Math.round(Math.max(selection.x1,selection.x2))-x,height:Math.round(Math.max(selection.y1,selection.y2))-y}}
+function parameters(){return{source:sourceName,source_size:sourceSize,operations:[...steps,...(angle()?[{type:'rotate',clockwise_degrees:angle(),expand:true,fill:'#333333'}]:[]),...(rect()&&rect().width>0&&rect().height>0?[{type:'crop',...rect()}]:[])],output_size:selection&&rect().width>0&&rect().height>0?[rect().width,rect().height]:[preview.width,preview.height]}}
+function draw(){view.width=preview.width;view.height=preview.height;ctx.drawImage(preview,0,0);const r=rect();if(r){ctx.fillStyle='#0006';ctx.beginPath();ctx.rect(0,0,view.width,view.height);ctx.rect(r.x,r.y,r.width,r.height);ctx.fill('evenodd');ctx.strokeStyle='#65dfff';ctx.lineWidth=Math.max(2,view.width/650);ctx.setLineDash([view.width/90,view.width/140]);ctx.strokeRect(r.x,r.y,r.width,r.height)}$('crop').disabled=!r||r.width<2||r.height<2;$('undo').disabled=!history.length;$('status').textContent=`当前画面 ${preview.width} × ${preview.height} 像素`+(r?`　选区 x=${r.x}, y=${r.y}，${r.width} × ${r.height}`:'　拖动鼠标框选区域');$('json').textContent=JSON.stringify(parameters(),null,2)}
+function render(){selection=null;const a=angle()*Math.PI/180;if(!a){preview=current;draw();return}const w=Math.ceil(Math.abs(current.width*Math.cos(a))+Math.abs(current.height*Math.sin(a))),h=Math.ceil(Math.abs(current.width*Math.sin(a))+Math.abs(current.height*Math.cos(a)));preview=canvas(w,h);const c=preview.getContext('2d');c.fillStyle='#333333';c.fillRect(0,0,w,h);c.translate(w/2,h/2);c.rotate(a);c.drawImage(current,-current.width/2,-current.height/2);draw()}
+function zero(){ $('angle').value=0;$('degrees').value=0 }
+function remember(){history.push({current,steps:[...steps]})}
+function commitRotation(){if(angle()){steps.push({type:'rotate',clockwise_degrees:angle(),expand:true,fill:'#333333'});current=preview;zero()}}
+function point(e){const b=view.getBoundingClientRect();return{x:Math.max(0,Math.min(view.width,(e.clientX-b.left)*view.width/b.width)),y:Math.max(0,Math.min(view.height,(e.clientY-b.top)*view.height/b.height))}}
+view.onpointerdown=e=>{if(!preview)return;view.setPointerCapture(e.pointerId);start=point(e);selection={x1:start.x,y1:start.y,x2:start.x,y2:start.y};draw()};
+view.onpointermove=e=>{if(!start)return;const p=point(e);selection.x2=p.x;selection.y2=p.y;draw()};
+view.onpointerup=()=>{start=null};view.onpointercancel=()=>{start=null};
+$('angle').oninput=()=>{$('degrees').value=$('angle').value;render()};$('degrees').oninput=()=>{$('angle').value=$('degrees').value;render()};
+$('rotate').onclick=()=>{if(!angle())return;remember();commitRotation();render()};
+$('crop').onclick=()=>{const r=rect();if(!r||r.width<2||r.height<2)return;remember();commitRotation();const c=canvas(r.width,r.height);c.getContext('2d').drawImage(preview,r.x,r.y,r.width,r.height,0,0,r.width,r.height);steps.push({type:'crop',...r});current=c;zero();render()};
+$('clear').onclick=()=>{selection=null;draw()};$('undo').onclick=()=>{const s=history.pop();if(!s)return;current=s.current;steps=s.steps;zero();render()};$('reset').onclick=()=>{if(!original)return;remember();current=original;steps=[];zero();render()};
+function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+$('save').onclick=()=>{const r=rect();let out=preview;if(r&&r.width>0&&r.height>0){out=canvas(r.width,r.height);out.getContext('2d').drawImage(preview,r.x,r.y,r.width,r.height,0,0,r.width,r.height)}out.toBlob(b=>download(b,'baby-crib-crop.png'),'image/png')};
+$('params').onclick=()=>download(new Blob([JSON.stringify(parameters(),null,2)],{type:'application/json'}),'baby-crib-crop.json');
+async function load(src,name){const im=new Image();im.src=src;await im.decode();original=canvas(im.naturalWidth,im.naturalHeight);original.getContext('2d').drawImage(im,0,0);current=original;sourceSize=[original.width,original.height];sourceName=name;steps=[];history=[];zero();render()}
+$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const url=URL.createObjectURL(f);try{await load(url,f.name)}finally{URL.revokeObjectURL(url)}};
+load('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(document.getElementById('demo').textContent),'demo.svg');
+</script></html>

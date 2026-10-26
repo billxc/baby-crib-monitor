@@ -1,0 +1,18 @@
+# Private runtime inputs and results — never commit
+.local/
+private/
+data/
+captures/
+recordings/
+results/
+exports/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+# Dependencies and test artifacts
+node_modules/
+test-results/
+playwright-report/
+.DS_Store

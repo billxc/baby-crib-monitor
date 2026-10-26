@@ -1,0 +1,37 @@
+const { test, expect } = require('@playwright/test');
+const { pathToFileURL } = require('node:url');
+const path = require('node:path');
+
+test('crop, rotate, export parameters and image, then undo', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(pathToFileURL(path.join(__dirname, '../tools/crop/index.html')).href);
+  await expect(page.locator('#status')).toContainText('1280 × 720');
+  const box = await page.locator('#view').boundingBox();
+  await page.mouse.move(box.x + box.width * .2, box.y + box.height * .2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * .8, box.y + box.height * .8);
+  await page.mouse.up();
+  await page.click('#crop');
+  const cropped = await page.locator('#view').evaluate(c => [c.width, c.height]);
+  expect(cropped).toEqual([768, 432]);
+  await page.fill('#degrees', '10');
+  await page.locator('#degrees').dispatchEvent('input');
+  await page.click('#rotate');
+  const pending = page.waitForEvent('download');
+  await page.click('#params');
+  const download = await pending;
+  const stream = await download.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const params = JSON.parse(Buffer.concat(chunks));
+  expect(params.source_size).toEqual([1280, 720]);
+  expect(params.operations.map(op => op.type)).toEqual(['crop', 'rotate']);
+  expect(params.operations[1].clockwise_degrees).toBe(10);
+  const pngPending = page.waitForEvent('download');
+  await page.click('#save');
+  expect((await pngPending).suggestedFilename()).toBe('baby-crib-crop.png');
+  await page.click('#undo');
+  expect(await page.locator('#view').evaluate(c => [c.width, c.height])).toEqual(cropped);
+  expect(errors).toEqual([]);
+});

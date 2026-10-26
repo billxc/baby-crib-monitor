@@ -1,0 +1,12 @@
+{
+  "name": "baby-crib-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first crib monitoring experiments and browser-only crop tooling",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
