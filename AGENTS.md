@@ -1,6 +1,6 @@
 # Project boundaries
 
-- `tools/crop/` is the browser-only crop tool. `runtime/` is an offline historical single-image inference runner with a causal three-sample majority filter; live collection is not implemented.
+- `tools/crop/` is the browser-only crop tool. `runtime/` contains offline and serial 60-second live single-image inference runners with a shared causal three-sample majority filter. Live ROI is static; do not claim dynamic camera tracking.
 - Keep this repository suitable for future publication. Never add real camera images, recordings, base64 camera footage, real calibration parameters, model outputs, credentials, local addresses or machine-specific deployment scripts, even while the repository is private.
 - Keep runtime/private data outside the repository. `.local/` is ignored for temporary development only; do not force-add ignored files.
 - Use synthetic fixtures for tests. Run `npm ci --include=dev` and `npm test`; browser tests keep Chromium sandbox enabled. Runtime tests: `python -m unittest discover -s runtime -p 'test_*.py'` after installing `runtime/requirements.txt`.

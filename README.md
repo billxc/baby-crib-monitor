@@ -1,6 +1,6 @@
 # Baby Crib Monitor
 
-本地优先的婴儿床占用观察项目。包含**纯前端画面裁切工具**和**离线历史画面单图判断工具**。尚不包含实时采集服务。
+本地优先的婴儿床占用观察项目。包含**纯前端画面裁切工具**、**离线历史画面单图判断工具**和**60 秒串行实时观察 runner**。
 
 ## 当前可用：裁切工具
 
@@ -61,7 +61,29 @@ python runtime/runner.py /path/to/private/config.json
 
 输出包括 `frames/` 裁切图、可断点续跑的 `results.jsonl`、`progress.json`，完成后生成 `results.csv`、`summary.json`、`segments.json`。输出保留原始不明确/缺失标记，不能只看滤波结果推断这些时段都被成功观察。有录像索引但目标时刻没有可解码视频帧时，记为 `missing`，并记录 `missing_reason: no_frame_at_sample_time`；不移动采样时刻、不用别的画面替代。重跑必须使用相同冻结配置和采样清单。
 
-尚未实现实时采集、自动发现录像或在线通知。本项目不做活体检测，也不把床位占用信号解释为已确认睡眠。
+尚未实现自动发现录像或在线通知。本项目不做活体检测，也不把床位占用信号解释为已确认睡眠。
+
+## 实时观察（静态 ROI）
+
+复制 `runtime/live.example.json` 到仓库外并填写私有配置，再将裁切工具导出的 JSON 放到其相邻目录。运行：
+
+```sh
+python runtime/live.py /path/to/private/config.json --cycles 3
+# 不加 --cycles 则持续运行；有限验证同样等待正常的 60 秒间隔
+python runtime/live.py /path/to/private/config.json
+```
+
+仅从运行机器通过 RTSP TCP 抽取一帧，完整解码后按相同的有序变换裁切，再发起一个请求（仅含这一张裁切图）。复用历史 runner 的 prompt、JSON schema、temperature=0、seed=42、max_completion_tokens=32、enable_thinking=false。不会自动切换模型或调用云服务。`ffmpeg` 可在私有配置中指定，否则使用 imageio-ffmpeg 内置路径。
+
+- 固定 **60 秒**周期，串行、不重叠；取流和推理有独立超时。耗时过长则跳过错过的 tick，不补跑、不积压；跳过后重置滤波并在当前状态和下一条记录中标记缺口。
+- 因果最近 **3 次观测**多数决（不是旧的 120 秒采样）：`unclear` 不投票，至少 2 票才切换，票数不足/平票保持；首次明确结果初始化。图像缺失标为 `missing` 并清空状态。推理失败但图像存在时标为 `unclear`，另记错误，下一周期继续。
+- 输出目录持有 OS 文件锁，避免两个实例同时采样；异常退出自动释放。每次启动创建独立 session、重新初始化滤波，不跨进程停机延续票数。
+- `sessions/<unique>/run-config.json` 冻结配置，`full/` 保存原图，`frames/` 保存裁切图，`results.jsonl` 逐行保留 UTC 开始/完成时间、raw、filtered、unknown 保持标记、错误、缺失原因、模型响应及图像尺寸。可据此汇总时段，**不得将缺失/unknown 的保持状态视为观察成功**。
+- 根目录 `current.json` 原子更新当前结果；`heartbeat.json` 标记 PID、session、采样/等待/有限验证完成阶段。等待时每 5 秒更新，采样阶段受超时限制；调用方应同时检查心跳年龄和记录时间，不能把文件存在当作健康。
+- 所有输出（含模型响应、画面及错误详情）均为私有数据。runner 不自动删除历史产物；持续保留原图/裁切图会增长磁盘占用，需由所有者另行制定保留策略。
+- 当前明确标为 `roi_mode: static`。摄像头转动后固定裁切可能不再对准床区；尚无动态床区识别或可靠性保证，不可用于婴儿安全告警。
+
+常驻运行可使用系统任务调度器：绝对 Python 路径、冻结 release 路径、私有配置路径、用户级最低权限、忽略重复实例、崩溃重试和无限执行时长。任务应由系统而非 SSH 会话托管。配置/任务脚本、备份及验收证据不进 Git；先前台验证三个实际分钟周期，再启动任务并核对定义与启动结果。未重启验证时不要宣称已验收开机自启。
 
 ## License
 

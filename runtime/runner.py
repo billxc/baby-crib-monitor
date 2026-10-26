@@ -1,5 +1,4 @@
 """Offline historical sampling: exactly one image per inference request."""
-import base64
 from collections import Counter
 import csv
 import json
@@ -15,15 +14,7 @@ from PIL import Image
 from filtering import OccupancyFilter
 from imaging import transform
 
-PROMPT = ('判断图中婴儿床内是否有婴儿或小孩，不判断睡眠。床外大人不算。'
-          '孩子被被褥部分遮挡但仍能确认时算yes；仅有被褥或玩具不算孩子；'
-          '关键区域被遮挡到无法确认时返回unclear。只输出JSON，字段in_crib，'
-          '值为yes、no或unclear。')
-SCHEMA = {'type': 'json_schema', 'json_schema': {
-    'name': 'crib_occupancy', 'strict': True, 'schema': {
-        'type': 'object', 'properties': {'in_crib': {
-            'type': 'string', 'enum': ['yes', 'no', 'unclear']}},
-        'required': ['in_crib'], 'additionalProperties': False}}}
+from inference import PROMPT, infer
 
 
 def save_json(path, value):
@@ -119,22 +110,7 @@ def run(config_path):
             available = frame.exists() or extract_crop(http, sample, frame, crop, ffmpeg, output)
             missing_reason = 'no_frame_at_sample_time' if not available else None
         if available:
-            content = [{'type': 'image_url', 'image_url': {
-                'url': 'data:image/jpeg;base64,'+base64.b64encode(frame.read_bytes()).decode()}}]
-            payload = {'model': config['model'], 'messages': [
-                {'role': 'system', 'content': PROMPT}, {'role': 'user', 'content': content}],
-                'temperature': 0, 'seed': 42, 'max_completion_tokens': 32,
-                'response_format': SCHEMA,
-                'chat_template_kwargs': {'enable_thinking': False}}
-            request = urllib.request.Request(config['model_base_url'].rstrip('/')+'/chat/completions',
-                                             data=json.dumps(payload).encode(),
-                                             headers={'Content-Type': 'application/json'})
-            started = time.perf_counter()
-            with http.open(request, timeout=120) as source:
-                response = json.load(source)
-            seconds = round(time.perf_counter()-started, 3)
-            raw = json.loads(response['choices'][0]['message']['content'])['in_crib']
-            assert raw in ('yes', 'no', 'unclear')
+            raw, seconds, response = infer(http, frame, config)
         filtered = smoother.update(raw)
         record = {'id': sample['id'], 'epoch': sample['epoch'], 'timestamp': sample['timestamp'],
                   'raw': raw, 'filtered': filtered,

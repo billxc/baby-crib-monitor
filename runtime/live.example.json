@@ -1,0 +1,10 @@
+{
+  "stream_url": "rtsp://camera.example.invalid/stream",
+  "model_base_url": "http://model.example.invalid/v1",
+  "model": "local-vision-model",
+  "crop_config": "crop.json",
+  "output_dir": "/path/to/private/live",
+  "interval_seconds": 60,
+  "capture_timeout_seconds": 20,
+  "inference_timeout_seconds": 35
+}
