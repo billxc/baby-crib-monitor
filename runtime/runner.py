@@ -99,8 +99,9 @@ def run(config_path):
                     shutil.copyfileobj(source, target)
                 subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-threads', '2',
                                 '-ss', str(sample['offset_seconds']), '-i', str(video),
+                                '-pix_fmt', 'yuvj420p', '-color_range', 'pc',
                                 '-frames:v', '1', '-update', '1', '-y', str(full)],
-                               capture_output=True, check=True, timeout=60)
+                               stdout=subprocess.DEVNULL, check=True, timeout=60)
                 with Image.open(full) as image:
                     transform(image.convert('RGB'), crop).save(frame, quality=95)
                 full.unlink()
