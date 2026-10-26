@@ -46,6 +46,8 @@ class LiveTest(unittest.TestCase):
             self.assertIn('yuvj420p', command)
             self.assertIn('pc', command)
             self.assertIn('tcp', command)
+            self.assertEqual(command[command.index('-skip_frame')+1], 'nokey')
+            self.assertLess(command.index('-skip_frame'), command.index('-i'))
 
     def test_inference_failure_is_unknown_and_next_observation_recovers(self):
         smoother = OccupancyFilter()

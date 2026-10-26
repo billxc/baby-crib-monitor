@@ -52,9 +52,12 @@ def exclusive(path):
 
 
 def capture(config, crop, full, frame):
+    # Initial inter frames can lack references (e.g. HEVC after RTSP connect).
+    # Wait for a decoder keyframe within the existing bounded capture timeout.
     subprocess.run([config.get('ffmpeg') or imageio_ffmpeg.get_ffmpeg_exe(),
                     '-hide_banner', '-loglevel', 'error', '-nostdin', '-threads', '2',
-                    '-rtsp_transport', 'tcp', '-i', config['stream_url'],
+                    '-rtsp_transport', 'tcp', '-skip_frame', 'nokey',
+                    '-i', config['stream_url'],
                     '-map', '0:v:0', '-an', '-frames:v', '1',
                     '-pix_fmt', 'yuvj420p', '-color_range', 'pc',
                     '-update', '1', '-y', str(full)], check=True,
