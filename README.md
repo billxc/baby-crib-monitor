@@ -63,7 +63,7 @@ python runtime/runner.py /path/to/private/config.json
 
 尚未实现自动发现录像或在线通知。本项目不做活体检测，也不把床位占用信号解释为已确认睡眠。
 
-## 实时观察（静态 ROI）
+## 实时观察（可选静态 ROI / YOLO 定位）
 
 复制 `runtime/live.example.json` 到仓库外并填写私有配置，再将裁切工具导出的 JSON 放到其相邻目录。运行：
 
@@ -81,10 +81,32 @@ python runtime/live.py /path/to/private/config.json
 - `sessions/<unique>/run-config.json` 冻结配置，`full/` 保存原图，`frames/` 保存裁切图，`results.jsonl` 逐行保留 UTC 开始/完成时间、raw、filtered、unknown 保持标记、错误、缺失原因、模型响应及图像尺寸。可据此汇总时段，**不得将缺失/unknown 的保持状态视为观察成功**。
 - 根目录 `current.json` 原子更新当前结果；`heartbeat.json` 标记 PID、session、采样/等待/有限验证完成阶段。等待时每 5 秒更新，采样阶段受超时限制；调用方应同时检查心跳年龄和记录时间，不能把文件存在当作健康。
 - 所有输出（含模型响应、画面、冻结配置及错误详情）均为私有数据；标准输出、标准错误和任务调度器日志也可能包含私有地址或凭据，不可直接贴到公开 issue 或提交到 Git。`output_dir` 请填写仓库外的绝对路径；输入配置和输出目录应仅允许所有者访问。runner 不自动删除历史产物；持续保留原图/裁切图会增长磁盘占用，需由所有者另行制定保留策略。
-- 当前明确标为 `roi_mode: static`。摄像头转动后固定裁切可能不再对准床区；尚无动态床区识别或可靠性保证，不可用于婴儿安全告警。
+- 原配置默认 `roi_mode: static`，保留离线/静态兼容模式。摄像头转动后固定裁切可能不再对准床区；两种模式均无可靠性或婴儿安全告警保证。
 
-常驻运行可使用系统任务调度器：绝对 Python 路径、冻结 release 路径、私有配置路径、用户级最低权限、忽略重复实例、崩溃重试和无限执行时长。任务应由系统而非 SSH 会话托管。配置/任务脚本、备份及验收证据不进 Git；先前台验证三个实际分钟周期，再启动任务并核对定义与启动结果。未重启验证时不要宣称已验收开机自启。
+### YOLO CPU 定位与 PM2
+
+`runtime/live.yolo.example.json` 为通用占位配置。请在独立 Python 环境安装选定的 Ultralytics/Torch 版本（YOLO26 不能只把旧包的权重文件替换掉），显式配置私有 checkpoint；可用 `checkpoint_sha256` 检查权重完整性。测试与依赖升级必须在目标运行机器执行。当前集成验证目标为 Ultralytics 8.4.189、Torch 2.7.1 CPU。
+
+`roi_mode: yolo` 使用 CPU、默认2线程，显式 `nms=True` one-to-many、imgsz512/conf0.6/iou0.7/max_det10/class0 crib，按置信度取 top1。bbox 每边按宽/高4% padding，floor/ceil 后 clip 原图。无框记 `missing/no_crib_detection`、清空滤波且**不请求 Qwen、不回退静态 ROI**；检测异常也缺失，另存错误。Qwen失败保持既有 unclear 滤波语义。`qwen_max_edge` 可限制裁切图最长边（不放大）；不配置则不缩小。记录原始框、实际整数crop、缩放前后尺寸和实际发送 JPEG 的 SHA256；每请求仍只有一张图，不会云回退。每步耗时与 raw/filter/缺失原因均保留在私有 JSONL，可按时间段汇总。
+
+`runtime/ecosystem.example.cjs` 是 PM2 通用例子，复制到仓库外填写绝对路径；通过专用 `PM2_HOME` 管理且只保存这一组应用，不对全局实例执行 save/delete/restart。业务 supervisor 是 PM2；Windows 启动任务若需要，只引导专用 home 的 `pm2 resurrect --no-daemon`，不直接跑业务 Python。先备份旧任务（含所有触发器）和配置，有限前台三周期验收后再切换；旧任务只停用，保留回滚资料。SSH启动ack不代表断开后存活；需再次连接核实新记录、心跳和HTTP。系统重启/崩溃恢复必须分别实测才可宣称通过。数据、PM2日志/dump和启动脚本均私有，运行器不自动清理。
+
+**Windows 隔离注意：** PM2 7.0.4 的 `paths.js` 在 Windows 硬编码全局 named pipe，单设 `PM2_HOME` 不足以隔离。可对本项目的每个 Node/PM2 CLI 和 daemon 加 `--require /absolute/release/runtime/pm2-windows-isolation.cjs`，同时配置 `PM2_PACKAGE_ROOT` 为安装的 PM2 包根、`PM2_HOME` 为独立目录。此小适配在本进程 require cache 内覆盖 pipe 路径，不修改安装包；不要加载会强制指向其它 PM2_HOME 的既有 preload。若让 CLI spawn daemon，应通过私有 `NODE_OPTIONS` 传播 preload；启动任务前台 `resurrect --no-daemon` 则须显式 preload。升级 PM2 后需重新验收该内部 API 兼容性。
+
+### Prometheus（只有指标，无图片路由）
+
+可选 `metrics.host/port/allowed_clients`，绑定专用 LAN IP，部署防火墙必须仅允许监控机源地址；HTTP另有源IP白名单，只提供精确 `/metrics` 路由。HTTP线程读取加锁的进程内快照，不打开 `current.json/heartbeat.json`，避免 Windows 并发读取阻止原子替换。其它外部状态文件读取者在 Windows 上应使用 `FILE_SHARE_DELETE` 共享语义。部署记录与真实监听地址不进 Git。
+
+- `crib_monitor_state{kind="raw|filtered"}`：yes=1/no=0/unclear或missing=-1。filtered 可能保持旧状态，必须结合 raw/ROI/新鲜度解释。
+- `crib_monitor_up`：worker 主线程心跳90秒内新鲜为1，非识别成功率。等待时每5秒更新；采样过程不伪造心跳。
+- `crib_monitor_last_sample_timestamp_seconds`：最新采样开始；`crib_monitor_last_success_timestamp_seconds`：最新完整有效 Qwen 响应完成（unclear 也算技术成功）。初始化为0。
+- `crib_monitor_samples_total{result="yes|no|unclear|missing|error"}`：进程内累计，每次仅一个桶；任何记录有技术错误均进 error 桶（raw 仍可为 missing/unclear）。正常无框进 missing 桶。重启归零，不重放历史。
+- `crib_monitor_stage_duration_seconds{stage="capture|detect|qwen|total"}`：最近完成一次采样各阶段墙钟秒数，含失败阶段已耗时；未执行阶段为0。静态模式 capture 含变换，YOLO 模式 detect 含解码/推理/裁切/缩放/写盘。total 不含日志持久化及等待；启动导入/权重加载不在其中。
+- `crib_monitor_yolo_confidence` / `crib_monitor_roi_valid`：当前可用目标置信度/是否有可用框；无框或调度缺口为0。不是遮挡检测或安全验收。
+- `crib_monitor_process_start_time_seconds`：当前 worker 创建 exporter 的时间。
+
+旧静态 runner 的兼容托管方式可使用系统任务调度器（新 YOLO 常驻部署优先上述 PM2）：绝对 Python 路径、冻结 release 路径、私有配置路径、用户级最低权限、忽略重复实例、崩溃重试和无限执行时长。任务应由系统而非 SSH 会话托管。配置/任务脚本、备份及验收证据不进 Git；先前台验证三个实际分钟周期，再启动任务并核对定义与启动结果。未重启验证时不要宣称已验收开机自启。
 
 ## License
 
-MIT。许可证仅适用于仓库代码和合成演示素材，不包含用户的私人数据。
+MIT。许可证仅适用于仓库自有代码和合成演示素材，不包含用户的私人数据。可选 Ultralytics 依赖、官方预训练及其派生权重有独立 **AGPL-3.0** 许可边界，不随本仓库转为 MIT。权重不随仓库分发；私有运行并不自动免除所有适用义务，集成/分发/网络服务前应核实对应许可要求。本项目不要求公开家庭图像。

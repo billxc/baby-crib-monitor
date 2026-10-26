@@ -1,0 +1,27 @@
+{
+  "stream_url": "rtsp://camera.example.invalid/stream",
+  "model_base_url": "http://model.example.invalid/v1",
+  "model": "local-vision-model",
+  "roi_mode": "yolo",
+  "yolo": {
+    "checkpoint": "/path/to/private/checkpoint.pt",
+    "class_id": 0,
+    "class_name": "crib",
+    "imgsz": 512,
+    "conf": 0.6,
+    "iou": 0.7,
+    "max_det": 10,
+    "padding": 0.04,
+    "threads": 2
+  },
+  "qwen_max_edge": 1024,
+  "output_dir": "/path/to/private/live",
+  "interval_seconds": 60,
+  "capture_timeout_seconds": 20,
+  "inference_timeout_seconds": 35,
+  "metrics": {
+    "host": "192.0.2.10",
+    "port": 19109,
+    "allowed_clients": ["192.0.2.20"]
+  }
+}
